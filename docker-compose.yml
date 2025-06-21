@@ -1,0 +1,93 @@
+version: '3.8' # Versión del formato Docker Compose
+
+services:
+  # Servicio de la Base de Datos MySQL
+  mysql_db:
+    image: unir-database-mysql:latest # Usamos la imagen personalizada que construiste
+    container_name: unir-mysql-db # Nombre explícito para el contenedor
+    ports:
+      - "3306:3306" # Mapeo de puerto para acceder a la BD desde el host (opcional, para desarrollo/pruebas)
+    environment:
+      # Variables de entorno para la configuración inicial de MySQL
+      MYSQL_ROOT_PASSWORD: unir_root_password # Contraseña para el usuario root
+      MYSQL_DATABASE: unir_db                 # Nombre de la base de datos a crear
+      MYSQL_USER: app_user                    # Nombre del usuario de la aplicación
+      MYSQL_PASSWORD: app_password            # Contraseña del usuario de la aplicación
+    volumes:
+      # Montamos un volumen para la persistencia de los datos de la base de datos
+      # Así, los datos no se perderán si el contenedor se recrea o elimina
+      db_data:/var/lib/mysql
+      # Opcional: Montar el script de inicialización si NO lo has embebido en la imagen personalizada
+      # - ../unir-database-mysql/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    networks:
+      # Conecta este servicio a la red personalizada 'unir'
+      unir_app_network:
+        aliases:
+          - mysql_db_alias # Alias DNS alternativo dentro de la red
+    restart: always # Reinicia el contenedor si falla
+
+  # Servicio de Autores (Node.js)
+  authors_service:
+    image: unir-authors-service:latest # Imagen del servicio de autores
+    container_name: unir-authors-service
+    ports:
+      - "8001:3000" # Mapea puerto del host (8001) al puerto de la app (3000)
+    environment:
+      # Variables de entorno para la conexión a la base de datos
+      DB_HOST: mysql_db       # El nombre del servicio de la BD en Docker Compose
+      DB_USER: app_user
+      DB_PASSWORD: app_password
+      DB_NAME: unir_db
+    depends_on:
+      # Asegura que la BD se inicie antes que este servicio
+      - mysql_db
+    networks:
+      - unir_app_network
+    restart: always
+
+  # Servicio de Libros (Python)
+  books_service:
+    image: unir-books-service:latest # Imagen del servicio de libros
+    container_name: unir-books-service
+    ports:
+      - "8002:5000" # Mapea puerto del host (8002) al puerto de la app (5000)
+    environment:
+      # Variables de entorno para la conexión a la base de datos
+      DB_HOST: mysql_db       # El nombre del servicio de la BD en Docker Compose
+      DB_USER: app_user
+      DB_PASSWORD: app_password
+      DB_NAME: unir_db
+    depends_on:
+      # Asegura que la BD se inicie antes que este servicio
+      - mysql_db
+    networks:
+      - unir_app_network
+    restart: always
+
+  # Servicio de Catálogo (Go)
+  catalog_service:
+    image: unir-catalog-service:latest # Imagen del servicio de catálogo
+    container_name: unir-catalog-service
+    ports:
+      - "8000:8000" # Mapea puerto del host (8000) al puerto de la app (8000)
+    environment:
+      # URLs de los servicios que consulta, usando sus nombres de servicio
+      AUTHORS_SERVICE_URL: http://authors_service:3000
+      BOOKS_SERVICE_URL: http://books_service:5000
+    depends_on:
+      # Asegura que los servicios de autores y libros se inicien antes que este
+      - authors_service
+      - books_service
+    networks:
+      - unir_app_network
+    restart: always
+
+# Definición de Redes
+networks:
+  unir_app_network:
+    driver: bridge # Tipo de red (por defecto, pero explícito)
+    name: unir_app_network # Nombre personalizado para la red
+
+# Definición de Volúmenes (para persistencia de la BD)
+volumes:
+  db_data: # Nombre del volumen
